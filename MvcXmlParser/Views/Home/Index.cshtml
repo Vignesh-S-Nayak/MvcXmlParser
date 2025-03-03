@@ -1,0 +1,234 @@
+﻿@using Microsoft.AspNetCore.Html
+@model List<MvcXmlParser.Models.Category>
+
+@{
+    ViewData["Title"] = "XML Schema Viewer";
+    
+    int childPageSize = 5;
+}
+@functions {
+    public static HtmlString Highlight(string text, string term)
+    {
+        if (string.IsNullOrEmpty(text) || string.IsNullOrEmpty(term))
+            return new HtmlString(text);
+        var regex = new System.Text.RegularExpressions.Regex("(" + System.Text.RegularExpressions.Regex.Escape(term) + ")", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        string highlighted = regex.Replace(text, "<span class=\"highlight\">$1</span>");
+        return new HtmlString(highlighted);
+    }
+}
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>@ViewData["Title"] - MvcXmlParser</title>
+    <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css" />
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css" />
+    <link rel="stylesheet" href="~/css/site.css" />
+</head>
+<body>
+    <div class="container mt-4">
+        <h1 class="mb-4">XML Schema Viewer</h1>
+
+        
+        <form method="get" action="@Url.Action("Index")" class="mb-4 p-3 bg-light rounded shadow-sm">
+            <div class="row">
+                <div class="col-md-3">
+                    <label for="version">Version</label>
+                    <select id="version" name="version" class="form-control" onchange="this.form.page.value = 1; this.form.submit();">
+                        @{
+                            var versions = new[] { "6.0.0", "2.2.1" };
+                            foreach (var ver in versions)
+                            {
+                                <option value="@ver" selected="@(ViewBag.SelectedVersion == ver ? "selected" : null)">@ver</option>
+                            }
+                        }
+                    </select>
+                </div>
+                <div class="col-md-3">
+                    <label for="searchTerm">Search</label>
+                    <div class="input-group">
+                        <input type="text" id="searchTerm" name="searchTerm" class="form-control" value="@ViewBag.SearchTerm" placeholder="Search categories or values..." />
+                        <div class="input-group-append">
+                            <button type="submit" class="btn btn-primary"><i class="fas fa-search"></i></button>
+                            @if (!string.IsNullOrEmpty(ViewBag.SearchTerm))
+                            {
+                                <a href="@Url.Action("Index")" class="btn btn-secondary"><i class="fas fa-times"></i></a>
+                            }
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <label for="sortBy">Sort By</label>
+                    <select id="sortBy" name="sortBy" class="form-control" onchange="this.form.submit();">
+                        @{
+                            var sortOptions = new[] { new { Value = "Name", Text = "Name" }, new { Value = "ChildCount", Text = "Child Count" } };
+                            foreach (var option in sortOptions)
+                            {
+                                <option value="@option.Value" selected="@(ViewBag.SortBy == option.Value ? "selected" : null)">@option.Text</option>
+                            }
+                        }
+                    </select>
+                </div>
+                <div class="col-md-3">
+                    <label for="sortOrder">Order</label>
+                    <select id="sortOrder" name="sortOrder" class="form-control" onchange="this.form.submit();">
+                        @{
+                            var orderOptions = new[] { new { Value = "asc", Text = "Ascending" }, new { Value = "desc", Text = "Descending" } };
+                            foreach (var option in orderOptions)
+                            {
+                                <option value="@option.Value" selected="@(ViewBag.SortOrder == option.Value ? "selected" : null)">@option.Text</option>
+                            }
+                        }
+                    </select>
+                </div>
+            </div>
+            <input type="hidden" name="page" value="@ViewBag.CurrentPage" />
+            <input type="hidden" name="pageSize" value="@ViewBag.PageSize" />
+        </form>
+
+        <div class="mb-3">
+            <span>Showing <strong>@Model.Count</strong> of <strong>@ViewBag.TotalItems</strong> categories</span>
+            @if (!string.IsNullOrEmpty(ViewBag.SearchTerm))
+            {
+                <span> | Filtered by: <strong>@ViewBag.SearchTerm</strong></span>
+            }
+        </div>
+
+        @if (!Model.Any())
+        {
+            <div class="alert alert-info">No categories found.</div>
+        }
+        else
+        {
+            @foreach (var category in Model)
+            {
+                
+                bool categoryMatches = false;
+                bool autoExpand = false;
+                string searchTerm = ViewBag.SearchTerm as string;
+                if (!string.IsNullOrEmpty(searchTerm))
+                {
+                    if (category.Name.IndexOf(searchTerm, System.StringComparison.OrdinalIgnoreCase) >= 0)
+                        categoryMatches = true;
+                    else
+                    {
+                        foreach (var child in category.Children)
+                        {
+                            if ((!string.IsNullOrEmpty(child.Value) && child.Value.IndexOf(searchTerm, System.StringComparison.OrdinalIgnoreCase) >= 0)
+                            || (!string.IsNullOrEmpty(child.Description) && child.Description.IndexOf(searchTerm, System.StringComparison.OrdinalIgnoreCase) >= 0))
+                            {
+                                autoExpand = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+                var collapseId = "collapse-" + category.Name.Replace(" ", "-").Replace(".", "-");
+                var totalChildren = category.Children.Count;
+                var totalChildPages = (int)Math.Ceiling((double)totalChildren / childPageSize);
+                <div class="card mb-3 shadow-sm">
+                    <div class="card-header" data-toggle="collapse" href="#@collapseId">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <div>
+                                <h5 class="mb-0 d-inline">
+                                    @(string.IsNullOrEmpty(searchTerm)
+                                        ? category.Name
+                                        : (categoryMatches ? Highlight(category.Name, searchTerm) : category.Name))
+                                </h5>
+                                <span class="badge badge-primary ml-2">@totalChildren</span>
+                                @if (!string.IsNullOrEmpty(category.Description))
+                                {
+                                    <p class="text-muted mt-1 mb-0">
+                                        @(string.IsNullOrEmpty(searchTerm)
+                                            ? category.Description
+                                            : Highlight(category.Description, searchTerm))
+                                    </p>
+                                }
+                            </div>
+                            <i class="fas fa-chevron-down"></i>
+                        </div>
+                    </div>
+                    
+                    <div id="@collapseId" class="collapse @(autoExpand ? "show" : "")">
+                        <div class="card-body">
+                            <table class="table table-hover child-table">
+                                <thead class="thead-light">
+                                    <tr>
+                                        <th>Value</th>
+                                        <th>Description</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @for (int i = 0; i < totalChildren; i++)
+                                    {
+                                        var child = category.Children[i];
+                                        var childPage = (i / childPageSize) + 1;
+                                        var rowStyle = childPage == 1 ? "" : "display:none;";
+                                        <tr data-child-page="@childPage" style="@rowStyle">
+                                            <td>@(string.IsNullOrEmpty(searchTerm) ? child.Value : Highlight(child.Value, searchTerm))</td>
+                                            <td>@(string.IsNullOrEmpty(searchTerm) ? child.Description : Highlight(child.Description, searchTerm))</td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                            @if (totalChildPages > 1)
+                            {
+                                <nav class="child-pagination mt-2" data-total-pages="@totalChildPages" data-start-page="1" data-active-page="1" data-target="#@collapseId">
+                                    <ul class="pagination pagination-sm justify-content-center">
+                                        <li class="page-item first">
+                                            <a class="page-link child-page-link" href="javascript:void(0);" data-page="1" data-target="#@collapseId">First</a>
+                                        </li>
+                                        <li class="page-item prev-set">
+                                            <a class="page-link" href="javascript:void(0);">&laquo;</a>
+                                        </li>
+                                        @for (int p = 1; p <= totalChildPages; p++)
+                                        {
+                                            <li class="page-item page-number" data-page="@p" @(p > 5 ? "style=\"display:none;\"" : "")>
+                                                <a class="page-link child-page-link" href="javascript:void(0);" data-page="@p" data-target="#@collapseId">@p</a>
+                                            </li>
+                                        }
+                                        <li class="page-item next-set">
+                                            <a class="page-link" href="javascript:void(0);">&raquo;</a>
+                                        </li>
+                                        <li class="page-item last">
+                                            <a class="page-link child-page-link" href="javascript:void(0);" data-page="@totalChildPages" data-target="#@collapseId">Last</a>
+                                        </li>
+                                    </ul>
+                                </nav>
+                            }
+                        </div>
+                    </div>
+                </div>
+            }
+            
+            <nav class="outer-pagination" aria-label="Page navigation" data-total-pages="@ViewBag.TotalPages" data-start-page="1" data-active-page="@ViewBag.CurrentPage">
+                <ul class="pagination justify-content-center">
+                    <li class="page-item first">
+                        <a class="page-link outer-page-link" href="javascript:void(0);" data-page="1" data-url="@Url.Action("Index", new { version = ViewBag.SelectedVersion, searchTerm = ViewBag.SearchTerm, sortBy = ViewBag.SortBy, sortOrder = ViewBag.SortOrder, page = 1, pageSize = ViewBag.PageSize })">First</a>
+                    </li>
+                    <li class="page-item prev-set">
+                        <a class="page-link" href="javascript:void(0);">&laquo;</a>
+                    </li>
+                    @for (int i = 1; i <= ViewBag.TotalPages; i++)
+                    {
+                        <li class="page-item page-number @(i == ViewBag.CurrentPage ? "active" : "")" data-page="@i" @(i > 5 ? "style=\"display:none;\"" : "")>
+                            <a class="page-link outer-page-link" href="javascript:void(0);" data-page="@i" data-url="@Url.Action("Index", new { version = ViewBag.SelectedVersion, searchTerm = ViewBag.SearchTerm, sortBy = ViewBag.SortBy, sortOrder = ViewBag.SortOrder, page = i, pageSize = ViewBag.PageSize })">@i</a>
+                        </li>
+                    }
+                    <li class="page-item next-set">
+                        <a class="page-link" href="javascript:void(0);">&raquo;</a>
+                    </li>
+                    <li class="page-item last">
+                        <a class="page-link outer-page-link" href="javascript:void(0);" data-page="@ViewBag.TotalPages" data-url="@Url.Action("Index", new { version = ViewBag.SelectedVersion, searchTerm = ViewBag.SearchTerm, sortBy = ViewBag.SortBy, sortOrder = ViewBag.SortOrder, page = ViewBag.TotalPages, pageSize = ViewBag.PageSize })">Last</a>
+                    </li>
+                </ul>
+            </nav>
+        }
+    </div>
+    <script src="https://code.jquery.com/jquery-3.5.1.slim.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@4.5.2/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="~/js/site.js"></script>
+</body>
+</html>
